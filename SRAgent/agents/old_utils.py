@@ -10,8 +10,6 @@ from langchain_anthropic import ChatAnthropic
 from dynaconf import Dynaconf
 import openai
 
-# Custom
-from langchain_openai import AzureChatOpenAI
 
 def load_settings() -> Dict[str, Any]:
     """
@@ -242,8 +240,7 @@ def set_model(
                 timeout = 180.0  # Default value
 
     # Validate service_tier for OpenAI models
-    # Custom !
-    if service_tier == "flex" and not re.search(r"^(o[0-9]|^gpt-5|^azure)", model_name):
+    if service_tier == "flex" and not re.search(r"^(o[0-9]|^gpt-5)", model_name):
         raise ValueError(
             f"Service tier 'flex' only works with o3 and o4-mini, & gpt-5* models, not {model_name} (agent: {agent_name})"
         )
@@ -311,20 +308,6 @@ def set_model(
             max_tokens=max_tokens,
             service_tier=service_tier,
             timeout=timeout if service_tier == "flex" else None,
-        )
-    elif model_name.startswith("azure"):
-        # Custom - based on gpt-4 implementation
-        azure_deployment = model_name.split('-', 1)[1]
-        print(os.environ["AZURE_OPENAI_API_KEY"])
-        print(os.environ["AZURE_OPENAI_ENDPOINT"])
-        model = AzureChatOpenAI(
-            azure_deployment=azure_deployment,
-            api_version="2024-10-01",
-            temperature=temperature,
-            reasoning_effort=None, # GPT-4o models use temperature but not reasoning_effort
-            max_tokens=max_tokens,
-            service_tier=service_tier,
-            timeout=timeout if service_tier == "flex" else None
         )
     else:
         raise ValueError(f"Model {model_name} not supported")
