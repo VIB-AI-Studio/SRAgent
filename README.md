@@ -61,13 +61,21 @@ pip install -e ".[dev]"
 * `OPENAI_API_KEY` = API key for using the OpenAI API
   * **required** when using OpenAI models
   * See [Configuring models](#configuring-models) information on setting models
+* `AZURE_OPENAI_API_KEY` = API key for using Azure OpenAI models
+  * **required** when using Azure OpenAI chat models
+* `AZURE_OPENAI_ENDPOINT` = Azure OpenAI resource endpoint
+  * e.g., `https://your-resource.openai.azure.com/`
+* `AZURE_OPENAI_API_VERSION` = Azure OpenAI API version
+  * optional, but recommended
+* `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` = Azure embedding deployment name
+  * optional unless using tissue/disease ontology vector-store tools
 * `ANTHROPIC_API_KEY` = API key for using the Anthropic API
   * **required** when using Claude models
 * `EMAIL` = email for using the Entrez API
   * optional, but **HIGHLY** recommended
 * `NCBI_API_KEY` = API key for using the Entrez API
   * optional, increases rate limits
-* `DYNACONF` = switch between "test", "prod", and "claude" environments
+* `DYNACONF` = switch between "test", "prod", "claude", and "azure" environments
   * optional, default is "prod"
   * this affects the SQL database used and models selected
   * no database is used by default
@@ -520,6 +528,41 @@ export DYNACONF="claude"
 SRAgent entrez "Convert GSE121737 to SRX accessions"
 ```
 
+## Using Azure OpenAI models
+
+SRAgent supports Azure OpenAI deployments through a dedicated `azure` Dynaconf environment.
+
+Required environment variables:
+
+```bash
+export AZURE_OPENAI_API_KEY=your_azure_openai_key
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+export AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+export DYNACONF="azure"
+```
+
+With the default Azure environment, SRAgent expects the chat deployment name to be `gpt-5.2`.
+If your deployment name differs, update the `azure_openai_deployment.default` entry in
+[SRAgent/settings.yml](./SRAgent/settings.yml) or provide a custom settings file via
+`DYNACONF_SETTINGS_PATH`.
+
+Example:
+
+```bash
+export AZURE_OPENAI_API_KEY=your_azure_openai_key
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+export AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+export DYNACONF="azure"
+SRAgent entrez "Convert GSE121737 to SRX accessions"
+```
+
+If you want to use ontology/vector-store tooling (`tissue-ontology` or `disease-ontology`)
+without a regular OpenAI key, you must also create an Azure embedding deployment and set:
+
+```bash
+export AZURE_OPENAI_EMBEDDING_DEPLOYMENT="text-embedding-3-small"
+```
+
 You can also customize the specific Claude model in settings.yml:
 ```yaml
 claude:
@@ -529,6 +572,19 @@ claude:
     default: 0.1
   reasoning_effort:
     default: "medium"  # Set your preferred reasoning effort; use "" to disable
+```
+
+Azure defaults are also configurable in `settings.yml`:
+
+```yaml
+azure:
+  provider: "azure_openai"
+  models:
+    default: "gpt-5.2"
+  azure_openai_deployment:
+    default: "gpt-5.2"
+  azure_openai_api_version:
+    default: "2024-12-01-preview"
 ```
 
 # Setting up the SQL database

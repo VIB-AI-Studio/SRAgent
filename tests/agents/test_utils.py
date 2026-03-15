@@ -237,3 +237,55 @@ class TestSetModel:
                 thinking={"type": "disabled"},
                 max_tokens=1024,
             )
+
+    @patch("SRAgent.agents.utils.load_settings")
+    @patch.dict(
+        "os.environ",
+        {
+            "AZURE_OPENAI_ENDPOINT": "https://example-resource.openai.azure.com/",
+            "AZURE_OPENAI_API_KEY": "test-key",
+        },
+        clear=False,
+    )
+    def test_set_model_with_azure_openai(self, mock_load_settings):
+        """Test set_model with Azure OpenAI provider."""
+        mock_settings = {
+            "provider": {"default": "azure_openai"},
+            "models": {"default": "gpt-5.2"},
+            "temperature": {"default": 0.1},
+            "reasoning_effort": {"default": "medium"},
+            "service_tier": {"default": "default"},
+            "azure_openai_deployment": {"default": "gpt-5.2"},
+            "azure_openai_model": {"default": "gpt-5.2"},
+            "azure_openai_api_version": {"default": "2024-12-01-preview"},
+        }
+        mock_load_settings.return_value = mock_settings
+
+        with patch("SRAgent.agents.utils.AzureChatOpenAI") as mock_chat:
+            model = set_model()
+            mock_chat.assert_called_once_with(
+                azure_deployment="gpt-5.2",
+                api_version="2024-12-01-preview",
+                azure_endpoint="https://example-resource.openai.azure.com/",
+                api_key="test-key",
+                model="gpt-5.2",
+                reasoning_effort="medium",
+            )
+
+    @patch("SRAgent.agents.utils.load_settings")
+    @patch.dict("os.environ", {}, clear=True)
+    def test_set_model_with_azure_openai_missing_endpoint(self, mock_load_settings):
+        """Test Azure OpenAI raises a clear error when endpoint is missing."""
+        mock_settings = {
+            "provider": {"default": "azure_openai"},
+            "models": {"default": "gpt-5.2"},
+            "temperature": {"default": 0.1},
+            "reasoning_effort": {"default": "medium"},
+        }
+        mock_load_settings.return_value = mock_settings
+
+        with pytest.raises(
+            ValueError,
+            match="AZURE_OPENAI_ENDPOINT must be set when provider is azure_openai",
+        ):
+            set_model()

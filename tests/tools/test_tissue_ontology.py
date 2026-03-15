@@ -90,7 +90,8 @@ def mock_requests_get():
 def mock_chroma():
     with patch('SRAgent.tools.vector_db.chromadb.PersistentClient') as mock_client, \
          patch('SRAgent.tools.vector_db.Chroma') as mock_chroma, \
-         patch('SRAgent.tools.vector_db.OpenAIEmbeddings') as mock_embeddings:
+         patch('SRAgent.tools.vector_db.OpenAIEmbeddings') as mock_embeddings, \
+         patch('SRAgent.tools.vector_db.AzureOpenAIEmbeddings') as mock_azure_embeddings:
         
         # Configure mock chroma collection
         mock_collection = MagicMock()
@@ -107,6 +108,37 @@ def mock_chroma():
         mock_chroma.return_value = mock_vector_store
         
         yield mock_chroma
+
+
+@patch('os.path.exists', return_value=True)
+def test_load_vector_store_with_azure_embeddings(mock_exists):
+    """Test load_vector_store with Azure OpenAI embeddings."""
+    with patch.dict(
+        os.environ,
+        {
+            "AZURE_OPENAI_ENDPOINT": "https://example-resource.openai.azure.com/",
+            "AZURE_OPENAI_API_KEY": "test-key",
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-3-small",
+        },
+        clear=False,
+    ):
+        with patch('SRAgent.tools.vector_db.chromadb.PersistentClient') as mock_client, \
+             patch('SRAgent.tools.vector_db.Chroma') as mock_chroma, \
+             patch('SRAgent.tools.vector_db.AzureOpenAIEmbeddings') as mock_embeddings:
+
+            mock_collection = MagicMock()
+            mock_collection.count.return_value = 10
+            mock_client.return_value.get_collection.return_value = mock_collection
+
+            load_vector_store('/tmp/chroma', collection_name='uberon')
+
+            mock_embeddings.assert_called_once_with(
+                model='text-embedding-3-small',
+                azure_deployment='text-embedding-3-small',
+                azure_endpoint='https://example-resource.openai.azure.com/',
+                api_key='test-key',
+                api_version='2024-12-01-preview',
+            )
 
 
 # Mock for tarfile

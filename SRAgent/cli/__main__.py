@@ -32,9 +32,13 @@ def arg_parse(args=None) -> dict:
     interacting with the SRA and Entrez.
     """
     # check for OP
-    if os.getenv("OPENAI_API_KEY") is None and os.getenv("ANTHROPIC_API_KEY") is None:
+    if (
+        os.getenv("OPENAI_API_KEY") is None
+        and os.getenv("ANTHROPIC_API_KEY") is None
+        and os.getenv("AZURE_OPENAI_API_KEY") is None
+    ):
         raise ValueError(
-            "You must set either the OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable"
+            "You must set OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_OPENAI_API_KEY"
         )
 
     # main parser
