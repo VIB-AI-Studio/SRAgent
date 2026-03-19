@@ -5,7 +5,7 @@ import asyncio
 from functools import wraps
 from importlib import resources
 from typing import Dict, Any, Optional, Set
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from dynaconf import Dynaconf
 import openai
@@ -32,6 +32,71 @@ def load_settings() -> Dict[str, Any]:
         settings_files=[s_path], environments=True, env_switcher="DYNACONF"
     )
     return settings
+
+
+def _get_agent_setting(
+    settings: Dict[str, Any], key: str, agent_name: str, default: Any = None
+) -> Any:
+    """
+    Get an agent-specific setting from Dynaconf-style settings.
+
+    The setting may be a scalar value or a mapping keyed by agent name.
+    """
+    try:
+        value = settings[key]
+    except (KeyError, TypeError):
+        return default
+
+    if isinstance(value, dict):
+        if agent_name in value:
+            return value[agent_name]
+        if "default" in value:
+            return value["default"]
+        return default
+
+    try:
+        return value[agent_name]
+    except (KeyError, TypeError, AttributeError):
+        try:
+            return value["default"]
+        except (KeyError, TypeError, AttributeError):
+            return value if value is not None else default
+
+
+def _get_provider(settings: Dict[str, Any], model_name: str, agent_name: str) -> str:
+    """
+    Determine which provider to use for the requested model.
+    """
+    if model_name.startswith("claude"):
+        return "anthropic"
+
+    provider = _get_agent_setting(settings, "provider", agent_name)
+    if provider is None:
+        return "openai"
+
+    provider = str(provider).strip().lower()
+    if provider == "azure":
+        return "azure_openai"
+    if provider == "claude":
+        return "anthropic"
+    return provider
+
+
+def _get_azure_api_version(settings: Dict[str, Any], agent_name: str) -> str:
+    """
+    Resolve the Azure OpenAI API version from settings or environment.
+    """
+    configured_version = _get_agent_setting(
+        settings, "azure_openai_api_version", agent_name
+    )
+    if configured_version:
+        return configured_version
+
+    return (
+        os.getenv("AZURE_OPENAI_API_VERSION")
+        or os.getenv("OPENAI_API_VERSION")
+        or "2024-12-01-preview"
+    )
 
 
 def async_retry_on_flex_timeout(func):
@@ -184,63 +249,38 @@ def set_model(
 
     # Use provided params or get from settings
     if model_name is None:
-        try:
-            model_name = settings["models"][agent_name]
-        except KeyError:
-            # try default
-            try:
-                model_name = settings["models"]["default"]
-            except KeyError:
-                raise ValueError(f"No model name was provided for agent '{agent_name}'")
+        model_name = _get_agent_setting(settings, "models", agent_name)
+        if model_name is None:
+            raise ValueError(f"No model name was provided for agent '{agent_name}'")
 
     if temperature is None:
-        try:
-            temperature = settings["temperature"][agent_name]
-        except KeyError:
-            try:
-                temperature = settings["temperature"]["default"]
-            except KeyError:
-                raise ValueError(
-                    f"No temperature was provided for agent '{agent_name}'"
-                )
+        temperature = _get_agent_setting(settings, "temperature", agent_name)
+        if temperature is None:
+            raise ValueError(f"No temperature was provided for agent '{agent_name}'")
     if reasoning_effort is None:
-        try:
-            reasoning_effort = settings["reasoning_effort"][agent_name]
-        except KeyError:
-            try:
-                reasoning_effort = settings["reasoning_effort"]["default"]
-            except KeyError:
-                if temperature is None:
-                    raise ValueError(
-                        f"No reasoning effort or temperature was provided for agent '{agent_name}'"
-                    )
+        reasoning_effort = _get_agent_setting(
+            settings, "reasoning_effort", agent_name
+        )
+        if reasoning_effort is None and temperature is None:
+            raise ValueError(
+                f"No reasoning effort or temperature was provided for agent '{agent_name}'"
+            )
     if service_tier is None:
-        try:
-            service_tier = settings["service_tier"][agent_name]
-        except (KeyError, TypeError):
-            try:
-                service_tier = settings["service_tier"]["default"]
-            except (KeyError, TypeError):
-                try:
-                    service_tier = settings["service_tier"]
-                except (KeyError, TypeError):
-                    service_tier = "default"  # fallback to default service tier
+        service_tier = _get_agent_setting(
+            settings, "service_tier", agent_name, default="default"
+        )
 
     # Get timeout from settings (optional)
-    timeout = None
-    try:
-        timeout = settings["flex_timeout"][agent_name]
-    except (KeyError, TypeError):
-        try:
-            timeout = settings["flex_timeout"]["default"]
-        except (KeyError, TypeError):
-            try:
-                timeout = settings["flex_timeout"]
-            except (KeyError, TypeError):
-                timeout = 180.0  # Default value
+    timeout = _get_agent_setting(settings, "flex_timeout", agent_name, default=180.0)
+
+    provider = _get_provider(settings, model_name=model_name, agent_name=agent_name)
 
     # Validate service_tier for OpenAI models
-    if service_tier == "flex" and not re.search(r"^(o[0-9]|^gpt-5)", model_name):
+    if (
+        provider == "openai"
+        and service_tier == "flex"
+        and not re.search(r"^(o[0-9]|^gpt-5)", model_name)
+    ):
         raise ValueError(
             f"Service tier 'flex' only works with o3 and o4-mini, & gpt-5* models, not {model_name} (agent: {agent_name})"
         )
@@ -256,7 +296,7 @@ def set_model(
     }
 
     # Check model provider and initialize appropriate model
-    if model_name.startswith("claude"):  # e.g.,  "claude-3-7-sonnet-20250219"
+    if provider == "anthropic":  # e.g.,  "claude-3-7-sonnet-20250219"
         if agent_name in STRUCTURED_OUTPUT_AGENTS:
             think_tokens = 0
         elif reasoning_effort == "low":
@@ -287,6 +327,57 @@ def set_model(
             thinking=thinking,
             max_tokens=max_tokens,
         )
+    elif provider == "azure_openai":
+        if service_tier == "flex":
+            raise ValueError(
+                "Service tier 'flex' is not supported for Azure OpenAI deployments"
+            )
+
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        if not azure_endpoint:
+            raise ValueError(
+                "AZURE_OPENAI_ENDPOINT must be set when provider is azure_openai"
+            )
+        if not azure_api_key:
+            raise ValueError(
+                "AZURE_OPENAI_API_KEY must be set when provider is azure_openai"
+            )
+
+        azure_model_name = _get_agent_setting(
+            settings, "azure_openai_model", agent_name, default=model_name
+        )
+        azure_deployment = _get_agent_setting(
+            settings, "azure_openai_deployment", agent_name, default=model_name
+        )
+        azure_model_version = _get_agent_setting(
+            settings,
+            "azure_openai_model_version",
+            agent_name,
+            default=os.getenv("AZURE_OPENAI_MODEL_VERSION"),
+        )
+        azure_api_version = _get_azure_api_version(settings, agent_name)
+
+        azure_kwargs = {
+            "azure_deployment": azure_deployment,
+            "api_version": azure_api_version,
+            "azure_endpoint": azure_endpoint,
+            "api_key": azure_api_key,
+            "model": azure_model_name,
+        }
+        if azure_model_version:
+            azure_kwargs["model_version"] = azure_model_version
+        if max_tokens is not None:
+            azure_kwargs["max_tokens"] = max_tokens
+
+        if azure_model_name.startswith("gpt-4"):
+            azure_kwargs["temperature"] = temperature
+        elif re.search(r"(^o[0-9]|^gpt-5)", azure_model_name):
+            azure_kwargs["reasoning_effort"] = reasoning_effort
+        else:
+            raise ValueError(f"Model {azure_model_name} not supported")
+
+        model = AzureChatOpenAI(**azure_kwargs)
     elif model_name.startswith("gpt-4"):
         # GPT-4o models use temperature but not reasoning_effort
         # Use FlexTierChatOpenAI for automatic fallback support

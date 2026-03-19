@@ -3,11 +3,13 @@ default:
   db_port: 5432
   db_user: "postgres"
   db_timeout: 30
+  provider: "openai"
   service_tier: "standard"
   flex_timeout: 180
 
 test:
   db_name: "sragent-test"
+  provider: "openai"
   models:
     default: "gpt-5-mini"
     esearch: "gpt-5-mini"
@@ -95,6 +97,7 @@ test:
     
 prod:
   db_name: "sragent-prod"
+  provider: "openai"
   models:
     default: "gpt-5-mini"
     esearch: "gpt-5-mini"
@@ -182,6 +185,7 @@ prod:
   
 claude:
   db_name: "sragent-test"
+  provider: "anthropic"
   models:
     default: "claude-sonnet-4-5"
   temperature:
@@ -207,3 +211,21 @@ claude:
     step_summary: ""
   service_tier:
     default: "default"
+
+azure:
+  db_name: "sragent-test"
+  provider: "azure_openai"
+  models:
+    default: "gpt-5.2"
+  temperature:
+    default: 0.1
+  reasoning_effort:
+    default: "low"
+  service_tier:
+    default: "default"
+  azure_openai_deployment:
+    default: "gpt-5.2"
+  azure_openai_model:
+    default: "gpt-5.2"
+  azure_openai_api_version:
+    default: "2024-12-01-preview"

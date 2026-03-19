@@ -5,7 +5,7 @@ import sys
 
 ## 3rd party
 import chromadb
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
 
 
@@ -52,8 +52,48 @@ def load_vector_store(chroma_path: str, collection_name: str = "uberon") -> Chro
     if not os.path.exists(chroma_path):
         raise FileNotFoundError(f"Chroma DB directory not found: {chroma_path}")
 
-    # Initialize embeddings
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    # Initialize embeddings. Azure OpenAI requires a dedicated embedding deployment.
+    embedding_provider = os.getenv("SRAGENT_EMBEDDING_PROVIDER")
+    embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
+    if embedding_provider is None and os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"):
+        embedding_provider = "azure_openai"
+    elif embedding_provider is None:
+        embedding_provider = "openai"
+
+    embedding_provider = embedding_provider.lower()
+
+    if embedding_provider == "azure_openai":
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+        azure_api_version = (
+            os.getenv("AZURE_OPENAI_API_VERSION")
+            or os.getenv("OPENAI_API_VERSION")
+            or "2024-12-01-preview"
+        )
+
+        if not azure_endpoint or not azure_api_key or not azure_deployment:
+            raise ValueError(
+                "Azure OpenAI embeddings require AZURE_OPENAI_ENDPOINT, "
+                "AZURE_OPENAI_API_KEY, and AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
+            )
+
+        embeddings = AzureOpenAIEmbeddings(
+            model=os.getenv("AZURE_OPENAI_EMBEDDING_MODEL", embedding_model),
+            azure_deployment=azure_deployment,
+            azure_endpoint=azure_endpoint,
+            api_key=azure_api_key,
+            api_version=azure_api_version,
+        )
+    else:
+        if os.getenv("OPENAI_API_KEY") is None and os.getenv("AZURE_OPENAI_API_KEY"):
+            raise ValueError(
+                "OpenAI embeddings were selected, but OPENAI_API_KEY is not set. "
+                "Set OPENAI_API_KEY or configure Azure embeddings with "
+                "AZURE_OPENAI_EMBEDDING_DEPLOYMENT."
+            )
+        embeddings = OpenAIEmbeddings(model=embedding_model)
 
     # Load the persistent Chroma client
     persistent_client = chromadb.PersistentClient(path=chroma_path)
